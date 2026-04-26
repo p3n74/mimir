@@ -13,8 +13,9 @@ Mimir is an OpenAI-compatible LLM API router that forwards requests to Ollama ov
 - OpenAI-compatible `POST /v1/chat/completions`
 - Model list passthrough at `GET /v1/models`
 - Runtime config API (`GET/POST /api/config`)
-- Minimal web UI at `/` to update router config
-- Optional API key gate (you can rely on Cloudflare Access instead)
+- Minimal web UI at `/` to update router config and set a shared **API password** (Bearer token)
+- Optional env `ROUTER_API_KEY` as an alternate Bearer secret (useful for Coolify secrets)
+- You can still rely on Cloudflare Access at the edge; the API password is a simple extra gate for `/v1/*` and `/api/*`
 
 ## Local development
 
@@ -31,7 +32,7 @@ Mimir is an OpenAI-compatible LLM API router that forwards requests to Ollama ov
 - `HOST` default: `0.0.0.0`
 - `OLLAMA_BASE_URL` default: `http://127.0.0.1:11434`
 - `CONFIG_FILE_PATH` default: `./data/config.json`
-- `ROUTER_API_KEY` optional: Bearer token requirement for `/api/*` and `/v1/*`
+- `ROUTER_API_KEY` optional: if set, requests may authenticate with that Bearer value instead of (or as well as) the dashboard-configured API password
 
 ## Deploy on Coolify
 
@@ -44,13 +45,23 @@ Mimir is an OpenAI-compatible LLM API router that forwards requests to Ollama ov
 
 ## Test with curl
 
+When an API password is configured (or `ROUTER_API_KEY` is set), send a Bearer header:
+
 ```bash
-curl -X POST "https://mimir.citadel-codex.com/v1/chat/completions" \
+curl -sS "https://mimir.citadel-codex.com/v1/chat/completions" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_PASSWORD" \
   -d '{
     "model": "llama3.2",
     "messages": [{"role": "user", "content": "Hello from Mimir"}]
   }'
+```
+
+List models:
+
+```bash
+curl -sS "https://mimir.citadel-codex.com/v1/models" \
+  -H "Authorization: Bearer YOUR_PASSWORD"
 ```
 
 ## Notes

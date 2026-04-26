@@ -5,55 +5,193 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mimir Router</title>
     <style>
-      body { font-family: Arial, sans-serif; margin: 2rem; max-width: 760px; }
-      h1 { margin-bottom: 0.3rem; }
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 860px; line-height: 1.45; }
+      h1 { margin-bottom: 0.25rem; }
+      h2 { margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.25rem; }
       label { display: block; margin-top: 1rem; font-weight: 600; }
-      input { width: 100%; padding: 0.6rem; margin-top: 0.4rem; }
-      button { margin-top: 1rem; padding: 0.7rem 1rem; }
-      pre { background: #111; color: #f8f8f2; padding: 1rem; overflow-x: auto; }
+      input[type="text"], input[type="password"], input[type="url"] { width: 100%; padding: 0.55rem; margin-top: 0.35rem; box-sizing: border-box; }
+      .row { margin-top: 0.75rem; }
+      button { margin-top: 1rem; padding: 0.65rem 1rem; cursor: pointer; }
+      pre { background: #111; color: #f8f8f2; padding: 1rem; overflow-x: auto; font-size: 0.85rem; }
+      .hint { color: #555; font-size: 0.9rem; margin-top: 0.25rem; }
+      .muted { color: #666; font-size: 0.9rem; }
+      code { background: #f4f4f4; padding: 0.1rem 0.35rem; border-radius: 3px; }
     </style>
   </head>
   <body>
     <h1>Mimir</h1>
-    <p>OpenAI-compatible router for Ollama with lightweight runtime config.</p>
+    <p>OpenAI-compatible router for Ollama. Configure upstream and an optional shared API password below.</p>
 
-    <label for="ollamaBaseUrl">Ollama Base URL</label>
-    <input id="ollamaBaseUrl" placeholder="http://192.168.x.x:11434" />
+    <h2>Calling the LLM API</h2>
+    <p class="muted">
+      Mimir exposes OpenAI-style routes. Send <code>Authorization: Bearer &lt;your password&gt;</code> when an API password is set
+      (or when <code>ROUTER_API_KEY</code> is set in the server environment). <code>GET /api/config</code> never returns the password, only
+      <code>apiPasswordSet</code>.
+    </p>
+    <p class="muted">Replace <code>YOUR_PASSWORD</code> and model names as needed. Origin is this host: <code id="originLabel"></code></p>
 
-    <label for="defaultModel">Default Model</label>
-    <input id="defaultModel" placeholder="llama3.2" />
+    <label>Example: list models</label>
+    <pre id="curlModels"></pre>
 
-    <button id="save">Save Config</button>
+    <label>Example: chat completion (non-streaming)</label>
+    <pre id="curlChat"></pre>
+
+    <h2>Dashboard access</h2>
+    <p class="hint">If you have already set an API password, enter it here so this page can load and save settings. It is kept in this browser only (<code>sessionStorage</code>).</p>
+    <label for="bearerToken">Bearer password for this session</label>
+    <input id="bearerToken" type="password" autocomplete="off" placeholder="Leave empty if no password is configured yet" />
+    <div class="row">
+      <button type="button" id="rememberBearer">Remember in this tab</button>
+    </div>
+
+    <h2>Router settings</h2>
+    <label for="ollamaBaseUrl">Ollama base URL</label>
+    <input id="ollamaBaseUrl" type="url" placeholder="http://192.168.x.x:11434" />
+
+    <label for="defaultModel">Default model</label>
+    <input id="defaultModel" type="text" placeholder="llama3.2" />
+
+    <h2>API password (stored on server)</h2>
+    <p class="hint">Shared secret for <code>/v1/*</code> and <code>/api/*</code>. Plain text on disk in <code>CONFIG_FILE_PATH</code>—fine for a homelab; use Cloudflare Access for real perimeter control.</p>
+    <label class="row"><input type="checkbox" id="setApiPassword" /> Set or change API password</label>
+    <input id="newApiPassword" type="password" autocomplete="new-password" placeholder="New memorable password" disabled />
+    <label class="row"><input type="checkbox" id="removeApiPassword" /> Remove API password (open routes until you set one again)</label>
+
+    <button type="button" id="save">Save settings</button>
 
     <h2>Status</h2>
-    <pre id="output">Loading...</pre>
+    <pre id="output">Loading…</pre>
 
     <script>
+      const BEARER_KEY = "mimir_bearer";
       const out = document.getElementById("output");
       const base = document.getElementById("ollamaBaseUrl");
       const model = document.getElementById("defaultModel");
+      const bearerToken = document.getElementById("bearerToken");
+      const setApiPassword = document.getElementById("setApiPassword");
+      const newApiPassword = document.getElementById("newApiPassword");
+      const removeApiPassword = document.getElementById("removeApiPassword");
+      const origin = window.location.origin;
+      document.getElementById("originLabel").textContent = origin;
+
+      function shellEscape(s) {
+        return "'" + String(s).replace(/'/g, "'\\''") + "'";
+      }
+
+      function refreshCurlExamples() {
+        const pwd = bearerToken.value.trim() || "YOUR_PASSWORD";
+        const auth = " \\\n  -H " + shellEscape("Authorization: Bearer " + pwd");
+        document.getElementById("curlModels").textContent =
+          "curl -sS " + shellEscape(origin + "/v1/models") + auth;
+        document.getElementById("curlChat").textContent =
+          "curl -sS " +
+          shellEscape(origin + "/v1/chat/completions") +
+          " \\\n  -H " +
+          shellEscape("Content-Type: application/json") +
+          auth +
+          " \\\n  -d " +
+          shellEscape(
+            JSON.stringify({
+              model: model.value.trim() || "llama3.2",
+              messages: [{ role: "user", content: "Hello from curl" }]
+            })
+          );
+      }
+
+      function authHeaders() {
+        const headers = { "Content-Type": "application/json" };
+        const fromStorage = sessionStorage.getItem(BEARER_KEY);
+        const token = (fromStorage ?? bearerToken.value).trim();
+        if (token) headers["Authorization"] = "Bearer " + token;
+        return headers;
+      }
+
+      setApiPassword.addEventListener("change", () => {
+        newApiPassword.disabled = !setApiPassword.checked || removeApiPassword.checked;
+      });
+      removeApiPassword.addEventListener("change", () => {
+        if (removeApiPassword.checked) {
+          setApiPassword.checked = false;
+          newApiPassword.disabled = true;
+        } else {
+          newApiPassword.disabled = !setApiPassword.checked;
+        }
+      });
+
+      document.getElementById("rememberBearer").addEventListener("click", () => {
+        sessionStorage.setItem(BEARER_KEY, bearerToken.value.trim());
+        refreshCurlExamples();
+        loadConfig().catch((err) => {
+          out.textContent = "Could not load config: " + String(err);
+        });
+      });
+
+      (function initBearerFromSession() {
+        const stored = sessionStorage.getItem(BEARER_KEY);
+        if (stored) bearerToken.value = stored;
+        refreshCurlExamples();
+      })();
+
+      bearerToken.addEventListener("input", refreshCurlExamples);
+      model.addEventListener("input", refreshCurlExamples);
 
       async function loadConfig() {
-        const res = await fetch("/api/config");
-        const data = await res.json();
+        const res = await fetch("/api/config", { headers: authHeaders() });
+        const raw = await res.text();
+        let data;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          data = { _raw: raw };
+        }
+        if (!res.ok) {
+          out.textContent = JSON.stringify({ error: "Failed to load config", status: res.status, body: data }, null, 2);
+          return;
+        }
         base.value = data.ollamaBaseUrl || "";
         model.value = data.defaultModel || "";
         out.textContent = JSON.stringify(data, null, 2);
+        refreshCurlExamples();
       }
 
       document.getElementById("save").addEventListener("click", async () => {
-        const payload = { ollamaBaseUrl: base.value.trim(), defaultModel: model.value.trim() };
+        const payload = {
+          ollamaBaseUrl: base.value.trim(),
+          defaultModel: model.value.trim()
+        };
+        if (removeApiPassword.checked) {
+          payload.apiPassword = "";
+        } else if (setApiPassword.checked && newApiPassword.value) {
+          payload.apiPassword = newApiPassword.value;
+        }
+
         const res = await fetch("/api/config", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: authHeaders(),
           body: JSON.stringify(payload)
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         out.textContent = JSON.stringify(data, null, 2);
+
+        if (res.ok) {
+          if (removeApiPassword.checked) {
+            sessionStorage.removeItem(BEARER_KEY);
+            bearerToken.value = "";
+          } else if (setApiPassword.checked && newApiPassword.value) {
+            sessionStorage.setItem(BEARER_KEY, newApiPassword.value);
+            bearerToken.value = newApiPassword.value;
+            newApiPassword.value = "";
+            setApiPassword.checked = false;
+            newApiPassword.disabled = true;
+          }
+          removeApiPassword.checked = false;
+          refreshCurlExamples();
+          await loadConfig();
+        }
       });
 
       loadConfig().catch((err) => {
-        out.textContent = `Failed to load config: ${String(err)}`;
+        out.textContent = "Failed to load config: " + String(err);
       });
     </script>
   </body>
