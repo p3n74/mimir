@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Mimir Router</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 2rem; max-width: 760px; }
+      h1 { margin-bottom: 0.3rem; }
+      label { display: block; margin-top: 1rem; font-weight: 600; }
+      input { width: 100%; padding: 0.6rem; margin-top: 0.4rem; }
+      button { margin-top: 1rem; padding: 0.7rem 1rem; }
+      pre { background: #111; color: #f8f8f2; padding: 1rem; overflow-x: auto; }
+    </style>
+  </head>
+  <body>
+    <h1>Mimir</h1>
+    <p>OpenAI-compatible router for Ollama with lightweight runtime config.</p>
+
+    <label for="ollamaBaseUrl">Ollama Base URL</label>
+    <input id="ollamaBaseUrl" placeholder="http://192.168.x.x:11434" />
+
+    <label for="defaultModel">Default Model</label>
+    <input id="defaultModel" placeholder="llama3.2" />
+
+    <button id="save">Save Config</button>
+
+    <h2>Status</h2>
+    <pre id="output">Loading...</pre>
+
+    <script>
+      const out = document.getElementById("output");
+      const base = document.getElementById("ollamaBaseUrl");
+      const model = document.getElementById("defaultModel");
+
+      async function loadConfig() {
+        const res = await fetch("/api/config");
+        const data = await res.json();
+        base.value = data.ollamaBaseUrl || "";
+        model.value = data.defaultModel || "";
+        out.textContent = JSON.stringify(data, null, 2);
+      }
+
+      document.getElementById("save").addEventListener("click", async () => {
+        const payload = { ollamaBaseUrl: base.value.trim(), defaultModel: model.value.trim() };
+        const res = await fetch("/api/config", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        out.textContent = JSON.stringify(data, null, 2);
+      });
+
+      loadConfig().catch((err) => {
+        out.textContent = `Failed to load config: ${String(err)}`;
+      });
+    </script>
+  </body>
+</html>
